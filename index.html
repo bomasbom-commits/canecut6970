@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>ระบบแผนที่แปลงอ้อยรถตัด (LAN SQLite)</title>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Tahoma, 'Sarabun', sans-serif; display: flex; height: 100vh; width: 100vw; overflow: hidden; position: relative; }
+
+    .mobile-menu-btn {
+      display: none; position: absolute; top: 12px; left: 55px; z-index: 1100;
+      background: #1565C0; color: white; border: none; border-radius: 6px;
+      padding: 8px 14px; font-size: 13px; font-weight: 600;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.35); cursor: pointer;
+    }
+
+    .sidebar-overlay { display: none; position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.4); z-index: 1999; }
+
+    #sidebar { width: 380px; height: 100%; background: #ffffff; box-shadow: 2px 0 10px rgba(0,0,0,0.15); display: flex; flex-direction: column; z-index: 2000; transition: transform 0.3s ease; }
+    .sidebar-header { padding: 14px 16px; background: #1565C0; color: white; display: flex; justify-content: space-between; align-items: center; }
+    .sidebar-header h2 { font-size: 16px; font-weight: 600; }
+    .sidebar-header p { font-size: 11px; opacity: 0.85; margin-top: 2px; }
+    .btn-close-sidebar { display: none; background: none; border: none; color: white; font-size: 20px; cursor: pointer; line-height: 1; }
+    
+    .sidebar-controls { padding: 12px 12px 0 12px; display: flex; flex-direction: column; gap: 10px; background: #ffffff; z-index: 30; border-bottom: 1px solid #e0e0e0; padding-bottom: 12px; }
+    .sidebar-content { flex: 1; padding: 12px; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; gap: 10px; scroll-behavior: smooth; position: relative; }
+
+    .progress-box { background: #E3F2FD; border: 1px solid #BBDEFB; border-radius: 8px; padding: 10px 12px; }
+    .progress-text { font-size: 12px; font-weight: bold; color: #0D47A1; display: flex; justify-content: space-between; margin-bottom: 5px; }
+    .progress-bar-bg { width: 100%; height: 6px; background: #E0E0E0; border-radius: 3px; overflow: hidden; }
+    .progress-bar-fill { height: 100%; width: 0%; background: #1976D2; transition: width 0.3s; }
+    #errorMessage { display: none; background: #ffebee; color: #c62828; padding: 12px; border-radius: 6px; font-size: 12px; border: 1px solid #ef9a9a; line-height: 1.5; }
+
+    .search-box { position: relative; }
+    .search-input { width: 100%; padding: 9px 12px; border: 1px solid #cfd8dc; border-radius: 6px; font-size: 13px; outline: none; }
+    .search-input:focus { border-color: #1976D2; box-shadow: 0 0 0 2px rgba(25,118,210,0.2); }
+    .search-dropdown { position: absolute; top: 100%; left: 0; right: 0; background: white; border-radius: 6px; max-height: 200px; overflow-y: auto; box-shadow: 0 4px 12px rgba(0,0,0,0.2); display: none; z-index: 2002; }
+    .search-item { padding: 9px 12px; border-bottom: 1px solid #f0f0f0; cursor: pointer; font-size: 12px; }
+    .search-item:hover { background: #e3f2fd; }
+
+    .filter-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; }
+    .filter-label { font-size: 11px; font-weight: 600; color: #475569; display: flex; justify-content: space-between; align-items: center; }
+    .filter-select { width: 100%; padding: 7px 10px; border: 1px solid #cbd5e1; border-radius: 5px; font-size: 12px; outline: none; background: white; color: #1e293b; font-family: inherit; }
+
+    .tree-title { font-size: 13px; font-weight: bold; color: #37474f; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; }
+    .tree-root { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+    
+    .group-node { border: 1px solid #d0d7de; border-radius: 6px; background: #ffffff; }
+    .group-header { 
+      padding: 8px 10px; background: #f6f8fa; display: flex; align-items: center; justify-content: space-between; 
+      cursor: pointer; user-select: none; font-weight: 600; font-size: 13px; 
+      border-radius: 5px 5px 0 0; box-shadow: 0 1px 3px rgba(0,0,0,0.08); 
+    }
+    .group-header:hover { background: #eef2f6; }
+    
+    .sub-list { list-style: none; display: none; padding: 2px 0 2px 10px; background: #ffffff; border-top: 1px solid #e0e0e0; }
+    .sub-node { margin: 2px 0; }
+    .sub-header { 
+      padding: 6px 8px; display: flex; align-items: center; justify-content: space-between; 
+      cursor: pointer; font-size: 12px; font-weight: 500; border-radius: 4px; background: #ffffff; 
+      border-bottom: 1px solid #f0f0f0; box-shadow: 0 1px 2px rgba(0,0,0,0.05); 
+    }
+    .sub-header:hover { background: #f0f4f8; }
+    
+    .plot-list { list-style: none; display: none; padding: 2px 0 2px 16px; }
+    .plot-item { padding: 5px 8px; font-size: 12px; color: #1565c0; cursor: pointer; border-radius: 4px; display: flex; align-items: center; gap: 5px; justify-content: space-between; transition: background 0.3s, transform 0.2s; }
+    .plot-item:hover { background: #e3f2fd; color: #0d47a1; font-weight: 600; }
+    .plot-item.active-tree-plot { background: #ffe082 !important; color: #b78103 !important; font-weight: bold; border: 1px solid #ffd54f; transform: translateX(4px); }
+
+    .node-left { display: flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .sub-title-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .contractor-tag { color: #546e7a; font-size: 11px; font-weight: normal; margin-left: 2px; }
+
+    .color-dot { display: inline-block; width: 13px; height: 13px; border-radius: 3px; flex-shrink: 0; cursor: pointer; border: 1px solid rgba(0,0,0,0.2); transition: transform 0.1s; }
+    .color-dot:hover { transform: scale(1.2); }
+    .color-picker-input { position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }
+
+    .caret { transition: transform 0.2s; font-size: 9px; color: #666; display: inline-block; width: 12px; flex-shrink: 0; }
+    .caret.open { transform: rotate(90deg); }
+    .badge { background: #e0e0e0; color: #37474f; padding: 1px 6px; border-radius: 10px; font-size: 10.5px; font-weight: bold; }
+
+    #map { flex: 1; height: 100%; width: 100%; }
+
+    .leaflet-popup-content { margin: 12px; min-width: 270px; line-height: 1.4; max-height: 380px; overflow-y: auto; }
+    .leaflet-popup-content table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 11px !important; }
+    .leaflet-popup-content th, .leaflet-popup-content td { border: 1px solid #ccc; padding: 5px 7px; text-align: left; }
+    .leaflet-popup-content td:first-child { background-color: #f2f7fc; font-weight: bold; width: 40%; color: #333; }
+    .leaflet-popup-content td:nth-child(2) { color: #111; word-break: break-all; }
+
+    .transfer-box { margin-top: 8px; padding: 8px; background: #F1F8E9; border: 1px solid #C5E1A5; border-radius: 6px; }
+    .transfer-box select { width: 100%; padding: 4px; font-size: 11px; margin-top: 4px; border-radius: 4px; border: 1px solid #9CCC65; outline: none; }
+    .btn-transfer-popup { margin-top: 6px; width: 100%; background: #43A047; color: white; border: none; padding: 5px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; cursor: pointer; }
+
+    @media (max-width: 768px) {
+      .mobile-menu-btn { display: block; }
+      .btn-close-sidebar { display: block; }
+      #sidebar { position: absolute; top: 0; left: 0; width: 85%; max-width: 340px; transform: translateX(-100%); box-shadow: 4px 0 15px rgba(0,0,0,0.3); }
+      #sidebar.active { transform: translateX(0); }
+      .sidebar-overlay.active { display: block; }
+    }
+  </style>
+</head>
+<body>
+
+  <button id="mobileMenuBtn" class="mobile-menu-btn">📂 เมนู / ค้นหา</button>
+  <div id="sidebarOverlay" class="sidebar-overlay"></div>
+
+  <div id="sidebar">
+    <div class="sidebar-header">
+      <div>
+        <h2>แผนที่แปลงอ้อยรถตัด</h2>
+        <p>กลุ่มคิว > กลุ่มย่อย > รหัสแปลง</p>
+      </div>
+      <button id="btnCloseSidebar" class="btn-close-sidebar">✕</button>
+    </div>
+
+    <div class="sidebar-controls">
+      <div id="errorMessage">⚠️ <b>เชื่อมต่อเซิร์ฟเวอร์ไม่ได้</b></div>
+
+      <div id="progressContainer" class="progress-box">
+        <div class="progress-text"><span id="progressLabel">กำลังเตรียมโหลด...</span><span id="progressPercent">0%</span></div>
+        <div class="progress-bar-bg"><div id="progressBar" class="progress-bar-fill"></div></div>
+      </div>
+
+      <div class="search-box">
+        <input type="text" id="searchInput" class="search-input" placeholder="🔍 ค้นหารหัสแปลง, ชาวไร่..." />
+        <div id="searchDropdown" class="search-dropdown"></div>
+      </div>
+
+      <div class="filter-box">
+        <div class="filter-label">
+          <span>🚜 กรองตามชื่อ-สกุล รับเหมา:</span>
+          <span id="contractorPlotCount" style="color:#1565C0; font-size:10px;"></span>
+        </div>
+        <select id="contractorSelect" class="filter-select">
+          <option value="">-- แสดงทั้งหมดทุกผู้รับเหมา --</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="sidebar-content">
+      <div>
+        <div class="tree-title">
+          <span>🗂️ กลุ่มรถตัด (<span id="totalPlotsCount">0</span> แปลง)</span>
+          <label style="cursor: pointer; font-size: 11px; font-weight: normal; background: #e3f2fd; padding: 4px 8px; border-radius: 4px; border: 1px solid #bbdefb; color: #0d47a1; display: inline-flex; align-items: center; gap: 4px;">
+            <input type="checkbox" id="selectAllGroups" checked /> <span id="selectAllText">เปิดทั้งหมด</span>
+          </label>
+        </div>
+        <ul id="treeContainer" class="tree-root"></ul>
+      </div>
+    </div>
+  </div>
+
+  <div id="map"></div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <script>
+    const palette = [
+      '#E53935', '#8E24AA', '#1E88E5', '#00897B', '#43A047', 
+      '#FB8C00', '#F4511E', '#6D4C41', '#546E7A', '#00ACC1', 
+      '#D81B60', '#5E35B1', '#3949AB', '#7CB342', '#FDD835', 
+      '#00BCD4', '#9C27B0', '#E91E63', '#4CAF50', '#FF9800'
+    ];
+    
+    const subColorMap = {};
+    const subGroupPlotsMap = {};
+    const allKnownSubKeys = new Set();
+    const plotRegistry = {}; 
+    let globalPlotCounter = 0;
+    let treeData = {};
+    const subGroupLayers = {}; 
+    let searchIndex = [];
+    const totalBounds = L.latLngBounds([]);
+
+    /* Map Setup */
+    const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Esri World Imagery', maxZoom: 19 });
+    const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: 'OpenStreetMap', maxZoom: 19 });
+    const map = L.map('map', { center: [14.88, 103.49], zoom: 12, preferCanvas: true, layers: [satelliteLayer] });
+    L.control.layers({ "ภาพถ่ายดาวเทียม": satelliteLayer, "แผนที่ถนน": osmLayer }, null, { position: 'topright' }).addTo(map);
+
+    /* Sidebar Mobile */
+    const sidebar = document.getElementById('sidebar'), overlay = document.getElementById('sidebarOverlay');
+    document.getElementById('mobileMenuBtn').addEventListener('click', () => { sidebar.classList.add('active'); overlay.classList.add('active'); });
+    const closeSidebar = () => { sidebar.classList.remove('active'); overlay.classList.remove('active'); setTimeout(() => map.invalidateSize(), 300); };
+    document.getElementById('btnCloseSidebar').addEventListener('click', closeSidebar);
+    overlay.addEventListener('click', closeSidebar);
+
+    function getPlotCenterLatLng(layer) { return (layer.getBounds && layer.getBounds().isValid()) ? layer.getBounds().getCenter() : layer.getLatLng ? layer.getLatLng() : null; }
+
+    function createPopupContent(name, groupName, subGroup, color, props, centerLatLng, plotId) {
+      const plot = plotRegistry[plotId];
+      let c = `<div style="font-size: 13px;"><strong style="font-size: 15px; color: ${color};">📍 รหัสแปลง: ${name}</strong>`;
+      c += `<br/><span style="font-size: 12px; color: #555;"><b>กลุ่ม:</b> ${groupName} | <b>กลุ่มย่อย:</b> ${subGroup}</span>`;
+      
+      c += `<div class="transfer-box"><label style="font-weight:bold; font-size:11px; color:#33691E;">🔄 ย้ายไปกลุ่มอื่น:</label>
+            <select id="popupSel_${plotId}" onmousedown="event.stopPropagation();">`;
+      Array.from(allKnownSubKeys).sort().forEach(k => { 
+        const [m, s] = k.split(':::'); 
+        c += `<option value="${k}" ${k === plot.subKey ? 'selected' : ''}>${m} > ${s}</option>`; 
+      });
+      
+      c += `</select><button class="btn-transfer-popup" onclick="event.stopPropagation(); map.closePopup(); transferPlotInScenario('${plotId}', document.getElementById('popupSel_${plotId}').value);">บันทึกการย้าย</button>`;
+      c += `</div><hr style="margin:8px 0;border:none;border-top:1px solid #e0e0e0;"/>`;
+      
+      let rows = ''; 
+      for (const [k, v] of Object.entries(props)) { 
+        if (v && typeof v !== 'object') {
+          rows += `<tr><td>${k}</td><td>${v}</td></tr>`; 
+        } 
+      }
+      c += rows ? `<table>${rows}</table>` : `<p style="color:#777;font-size:11px;">ไม่มีข้อมูลเพิ่มเติม</p>`; 
+      return c + `</div>`;
+    }
+
+    window.transferPlotInScenario = async function(plotId, newSubKey) {
+      const plot = plotRegistry[plotId];
+      if (!plot || plot.subKey === newSubKey) return;
+      const [newMainG, newSubG] = newSubKey.split(':::');
+
+      try {
+        const res = await fetch('/api/reassign', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ plot_id: String(plot.name), main_group: newMainG, sub_group: newSubG })
+        });
+        if (!res.ok) throw new Error('บันทึกลงฐานข้อมูลล้มเหลว');
+        location.reload();
+      } catch (err) {
+        alert('เกิดข้อผิดพลาด: ' + err.message);
+      }
+    };
+
+    function focusPlot(plot) {
+      if (!map.hasLayer(subGroupLayers[plot.subKey])) map.addLayer(subGroupLayers[plot.subKey]); 
+      if (plot.layer.getBounds && plot.layer.getBounds().isValid()) {
+        map.fitBounds(plot.layer.getBounds(), { padding: [50, 50], maxZoom: 18 });
+      }
+      plot.layer.openPopup();
+    }
+
+    function scrollTreeToPlot(plotId) {
+      const plotLi = document.getElementById(plotId); 
+      if (!plotLi) return;
+      const subLi = plotLi.closest('.sub-node'), groupLi = plotLi.closest('.group-node');
+      if (subLi) subLi.querySelector('.plot-list').style.display = 'block';
+      if (groupLi) groupLi.querySelector('.sub-list').style.display = 'block';
+      plotLi.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    function buildHierarchyUI() {
+      const container = document.getElementById('treeContainer'); 
+      container.innerHTML = ''; 
+      let totalPlots = 0;
+
+      Object.keys(treeData).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})).forEach(mainGroup => {
+        const subGroups = treeData[mainGroup]; 
+        let gCount = 0; 
+        Object.keys(subGroups).forEach(s => gCount += subGroups[s].length); 
+        totalPlots += gCount;
+
+        const gLi = document.createElement('li'); 
+        gLi.className = 'group-node';
+        gLi.innerHTML = `<div class="group-header"><div class="node-left"><span class="caret">▶</span><input type="checkbox" checked class="cb-group" /><span>📁 ${mainGroup}</span></div><span class="badge">${gCount}</span></div><ul class="sub-list"></ul>`;
+        
+        const subUl = gLi.querySelector('.sub-list');
+        const gHeader = gLi.querySelector('.group-header');
+
+        Object.keys(subGroups).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})).forEach(subGroup => {
+          const plots = subGroups[subGroup];
+          const subKey = `${mainGroup}:::${subGroup}`;
+          const color = subColorMap[subKey];
+
+          const sLi = document.createElement('li'); 
+          sLi.className = 'sub-node';
+          sLi.innerHTML = `
+            <div class="sub-header">
+              <div class="node-left">
+                <span class="caret caret-sub">▶</span><input type="checkbox" checked class="cb-sub" />
+                <span class="color-dot" style="background:${color};"></span>
+                <span class="sub-title-text">📁 <b>${subGroup}</b></span>
+              </div>
+              <span class="badge" style="font-size:10px;">${plots.length}</span>
+            </div><ul class="plot-list"></ul>`;
+
+          const pUl = sLi.querySelector('.plot-list');
+          plots.forEach(p => {
+            const pLi = document.createElement('li'); 
+            pLi.id = p.uniqueId; 
+            pLi.className = 'plot-item'; 
+            pLi.innerHTML = `<span>📍 ${p.name}</span>`;
+            pLi.onclick = (e) => { e.stopPropagation(); focusPlot(p); }; 
+            pUl.appendChild(pLi);
+          });
+
+          const sHeader = sLi.querySelector('.sub-header');
+          sHeader.onclick = (e) => { 
+            if (e.target.tagName === 'INPUT') return; 
+            const open = pUl.style.display === 'block'; 
+            pUl.style.display = open ? 'none' : 'block'; 
+            sHeader.querySelector('.caret-sub').classList.toggle('open', !open); 
+          };
+
+          sHeader.querySelector('.cb-sub').onchange = function() {
+            if (this.checked) map.addLayer(subGroupLayers[subKey]); 
+            else map.removeLayer(subGroupLayers[subKey]);
+          };
+          subUl.appendChild(sLi);
+        });
+
+        gHeader.onclick = (e) => { 
+          if (e.target.tagName === 'INPUT') return; 
+          const open = subUl.style.display === 'block'; 
+          subUl.style.display = open ? 'none' : 'block'; 
+          gHeader.querySelector('.caret').classList.toggle('open', !open); 
+        };
+
+        gHeader.querySelector('.cb-group').onchange = function() {
+          const chk = this.checked;
+          subUl.querySelectorAll('.cb-sub').forEach(cb => { cb.checked = chk; cb.dispatchEvent(new Event('change')); });
+        };
+        container.appendChild(gLi);
+      });
+
+      document.getElementById('totalPlotsCount').innerText = totalPlots;
+    }
+
+    function populateContractorDropdown() {
+      const sel = document.getElementById('contractorSelect'); 
+      sel.innerHTML = '<option value="">-- แสดงทั้งหมดทุกผู้รับเหมา --</option>';
+      const cMap = {}; 
+      searchIndex.forEach(p => { 
+        if (p.contractor && p.contractor !== 'ไม่ระบุผู้รับเหมา') cMap[p.contractor] = (cMap[p.contractor] || 0) + 1; 
+      });
+      Object.keys(cMap).sort((a,b)=>a.localeCompare(b,'th')).forEach(c => {
+        sel.innerHTML += `<option value="${c}">${c} (${cMap[c]} แปลง)</option>`;
+      });
+    }
+
+    /* Main Load Data */
+    async function loadPlotsFromAPI() {
+      const pLabel = document.getElementById('progressLabel'),
+            pPercent = document.getElementById('progressPercent'),
+            pBar = document.getElementById('progressBar'),
+            pBox = document.getElementById('progressContainer'),
+            errBox = document.getElementById('errorMessage');
+
+      pLabel.innerText = 'กำลังเชื่อมต่อ SQLite...';
+      pPercent.innerText = '25%';
+      pBar.style.width = '25%';
+
+      try {
+        const res = await fetch('/api/plots');
+        if (!res.ok) throw new Error('API ล้มเหลว');
+
+        pLabel.innerText = 'กำลังประมวลผลแปลง...';
+        pPercent.innerText = '65%';
+        pBar.style.width = '65%';
+
+        const data = await res.json();
+        if (!data.features || data.features.length === 0) {
+          throw new Error('ไม่พบข้อมูลแปลงในฐานข้อมูล sugarcane.db');
+        }
+
+        data.features.forEach((feature) => {
+          if (!feature.geometry || !feature.geometry.coordinates) return;
+
+          const props = feature.properties || {};
+          const mainGroup = props.main_grp || 'ทั่วไป';
+          const subGroup = props.sub_grp || 'ทั่วไป';
+          const contractor = props.ผู้รับเหมา || 'ไม่ระบุผู้รับเหมา';
+          const plotName = props.รหัสแปลง || 'ไม่มีรหัส';
+          const uniqueId = `plot_li_${++globalPlotCounter}`;
+
+          const subKey = `${mainGroup}:::${subGroup}`;
+          allKnownSubKeys.add(subKey);
+
+          if (!subColorMap[subKey]) subColorMap[subKey] = palette[Object.keys(subColorMap).length % palette.length];
+          const color = subColorMap[subKey];
+
+          if (!subGroupLayers[subKey]) subGroupLayers[subKey] = L.layerGroup().addTo(map);
+
+          try {
+            const layer = L.geoJSON(feature, {
+              style: { color: color, weight: 2, opacity: 0.9, fillColor: color, fillOpacity: 0.35 },
+              pointToLayer: (f, latlng) => L.circleMarker(latlng, { radius: 5, fillColor: color, color: '#FFF', weight: 1, fillOpacity: 0.9 }),
+              onEachFeature: (f, l) => {
+                const center = getPlotCenterLatLng(l);
+                l.bindPopup(createPopupContent(plotName, mainGroup, subGroup, color, props, center, uniqueId));
+                l.on('click', () => scrollTreeToPlot(uniqueId));
+              }
+            });
+
+            subGroupLayers[subKey].addLayer(layer);
+
+            if (!treeData[mainGroup]) treeData[mainGroup] = {};
+            if (!treeData[mainGroup][subGroup]) treeData[mainGroup][subGroup] = [];
+
+            const plotObj = {
+              name: plotName, uniqueId: uniqueId, mainGroup: mainGroup, subGroup: subGroup,
+              subKey: subKey, layer: layer, color: color, props: props, contractor: contractor
+            };
+
+            treeData[mainGroup][subGroup].push(plotObj);
+            plotRegistry[uniqueId] = plotObj;
+            searchIndex.push(plotObj);
+
+            if (layer.getBounds && layer.getBounds().isValid()) totalBounds.extend(layer.getBounds());
+          } catch (e) {}
+        });
+
+        pLabel.innerText = '✅ โหลดสำเร็จ';
+        pPercent.innerText = '100%';
+        pBar.style.width = '100%';
+        setTimeout(() => { pBox.style.display = 'none'; }, 600);
+
+        buildHierarchyUI();
+        populateContractorDropdown();
+
+        if (totalBounds.isValid()) map.fitBounds(totalBounds, { padding: [30, 30] });
+
+      } catch (err) {
+        errBox.style.display = 'block';
+        errBox.innerHTML = `⚠️ <b>ข้อผิดพลาด:</b> ${err.message}`;
+        pBox.style.display = 'none';
+      }
+    }
+
+    // เริ่มทำงานทันที
+    loadPlotsFromAPI();
+  </script>
+</body>
+</html>
